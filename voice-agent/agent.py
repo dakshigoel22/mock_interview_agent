@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv(dotenv_path="/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/.env.local")
 
 import logging
 from dataclasses import dataclass
@@ -86,47 +86,21 @@ class Prev_experience_Agent(Agent):
     def __init__(self, name: str, *, chat_ctx: ChatContext | None = None) -> None:
         super().__init__(
             instructions=f"{common_instructions} The candidates's name is {name}."
-            "You have to ssk the candidate to tell about their past experiences and if they have done any internships or full-time.",
-            # each agent could override any of the model services, including mixing
-            # realtime and non-realtime models
-            llm=openai.realtime.RealtimeModel(voice="echo"),
-            # llm=openai.LLM(model="gpt-4.1-mini"),
-            # tts=openai.TTS(voice="echo"),
+            "You have to ask the candidate to tell about their past experiences and if they have done any internships or full-time."
+            "Do not ask any follow-up questions"
+            "Once you are satisfied and have completed the interview "
+            "you MUST call the function `interview_finished`.",
+            llm = "openai/gpt-4.1-mini",
             tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
             chat_ctx=chat_ctx,
         )
+        
 
     async def on_enter(self):
         # when the agent is added to the session, we'll initiate the conversation by
         # using the LLM to generate a reply
         self.session.generate_reply()
-
-    @function_tool
-    async def previous_experience_gathered(
-        self,
-        context: RunContext[InterviewData],
-        name: str,
-        prev_org : str,
-        prev_role : str
         
-    ):
-        """
-        Called when the user has provided their introduction
-        Args:
-            name: The name of the user
-        """
-
-        context.userdata.prev_org = prev_org
-        context.userdata.prev_role = prev_role
-        
-        # # to carry through the current chat history, pass in the chat_ctx
-        # interview_agent = Interview_Agent(name,prev_org, prev_role, chat_ctx=self.chat_ctx)
-
-        # logger.info(
-        #     "switching to the interview agent with the provided candidate's previous experiences: %s", context.userdata
-        # )
-        # return interview_agent
-    
     @function_tool
     async def interview_finished(self, context: RunContext[InterviewData]):
         """When you are fininshed with the interview so call this function to end the conversation."""
@@ -140,6 +114,46 @@ class Prev_experience_Agent(Agent):
 
         job_ctx = get_job_context()
         await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
+    
+
+    # @function_tool
+    # async def previous_experience_gathered(
+    #     self,
+    #     context: RunContext[InterviewData],
+    #     prev_org : str,
+    #     prev_role : str
+        
+    # ):
+    #     """
+    #     Called when the user has provided their introduction
+    #     Args:
+    #         name: The name of the user
+    #     """
+
+    #     context.userdata.prev_org = prev_org
+    #     context.userdata.prev_role = prev_role
+        
+    #     # # to carry through the current chat history, pass in the chat_ctx
+    #     # interview_agent = Interview_Agent(name,prev_org, prev_role, chat_ctx=self.chat_ctx)
+
+    #     # logger.info(
+    #     #     "switching to the interview agent with the provided candidate's previous experiences: %s", context.userdata
+    #     # )
+    #     # return interview_agent
+    
+    # @function_tool
+    # async def interview_finished(self, context: RunContext[InterviewData]):
+    #     """When you are fininshed with the interview so call this function to end the conversation."""
+    #     # interrupt any existing generation
+    #     self.session.interrupt()
+    #     # generate a goodbye message and hang up
+    #     # awaiting it will ensure the message is played out before returning
+    #     await self.session.generate_reply(
+    #         instructions=f"Say thankyou and goodbye to {context.userdata.name} and let them know that if they are suitable then they will get a call back.", allow_interruptions=False
+    #     )
+
+    #     job_ctx = get_job_context()
+    #     await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
     
 
 
