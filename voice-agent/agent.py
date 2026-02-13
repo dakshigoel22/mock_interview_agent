@@ -1,5 +1,5 @@
 from dotenv import load_dotenv
-load_dotenv(dotenv_path="/Users/dakshigoel/Desktop/interview-voice-agent/voice-agent/.env.local")
+load_dotenv()
 
 import logging
 from dataclasses import dataclass
