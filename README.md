@@ -1,4 +1,4 @@
-x# LiveKit Mock Interview Agent
+# LiveKit Mock Interview Agent
 
 A multi-agent voice-based interview system built with LiveKit that conducts mock interviews for candidates. The system features intelligent agent handoffs, persistent conversation context, and dynamic agent routing based on interview stage.
 
