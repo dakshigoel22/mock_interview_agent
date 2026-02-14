@@ -58,12 +58,9 @@ This dataclass maintains state across agent transitions and is passed to functio
 
 ### Prerequisites
 
-- Python 3.8+
+- Python 3.10+
 - LiveKit server instance
-- API credentials for:
-  - OpenAI (GPT-4-mini)
-  - Deepgram (Nova-3 STT)
-  - Cartesia (Sonic-3 TTS)
+- API credentials for LiveKit
 
 ### Installation
 
@@ -82,18 +79,21 @@ This dataclass maintains state across agent transitions and is passed to functio
    
    Create a `.env.local` file in the voice-agent directory:
    ```env
-   OPENAI_API_KEY=your_openai_api_key
-   DEEPGRAM_API_KEY=your_deepgram_api_key
-   CARTESIA_API_KEY=your_cartesia_api_key
    LIVEKIT_URL=your_livekit_server_url
    LIVEKIT_API_KEY=your_livekit_api_key
    LIVEKIT_API_SECRET=your_livekit_api_secret
+   NEXT_PUBLIC_LIVEKIT_URL=your_livekit_server_url
    ```
 
-### Running the Agent
+### Running the Agent 
+#### On DeV
 
 ```bash
-python agent.py
+uv run agent.py dev
+```
+####On console
+```bash
+uv run agent.py console
 ```
 
 The agent will start the LiveKit agent server and listen for incoming interview sessions.
@@ -131,7 +131,7 @@ Called when the candidate has provided their introduction.
 - `name`: Candidate's full name
 - `exp`: Candidate's experience description
 
-**Behavior**: Stores candidate information and transitions to `Prev_experience_Agent`
+**Behavior**: Stores candidate information and transitions to `Prev_experience_Agent.`
 
 ### Prev_experience_Agent
 
@@ -146,23 +146,6 @@ Signals the end of the interview session.
 ## Conversation Instructions
 
 The agents follow specific instructions to ensure professional, structured interviews:
-
-**Common Instructions**:
-- Act as "Kiya, a senior AI developer at Jobnova"
-- Maintain formal and polite tone
-- Do not repeat candidate statements
-- Do not answer candidate questions (interviewer role)
-- Do not use existing knowledge (focus on candidate's background)
-
-**IntroAgent Instructions**:
-- Greet the candidate
-- Request name and introduction
-
-**Prev_experience_Agent Instructions**:
-- Ask about past work experiences
-- Inquire about internships or full-time positions
-- Avoid follow-up questions
-- Call `interview_finished()` when satisfied
 
 ## Metrics and Monitoring
 
@@ -179,15 +162,6 @@ summary = usage_collector.get_summary()
 logger.info(f"Usage: {summary}")
 ```
 
-## Configuration
-
-### Optional Features
-
-#### Noise Cancellation
-Uncomment the import to enable Krisp BVC:
-```python
-from livekit.plugins import noise_cancellation
-```
 **Note**: Currently supported on Linux and macOS only.
 
 ### Customization
