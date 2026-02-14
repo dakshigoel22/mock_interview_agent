@@ -1,8 +1,9 @@
 from dotenv import load_dotenv
-load_dotenv(dotenv_path="/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/.env.local")
+load_dotenv(dotenv_path="")
 
 import logging
 from dataclasses import dataclass
+import asyncio
 
 from livekit import api
 from livekit.agents import (
@@ -50,7 +51,7 @@ class IntroAgent(Agent):
         super().__init__(
             instructions=f"{common_instructions}. Your goal is to start the interview. Greet the candidate."
             "You should ask the candidate for their name and an introduction."
-        )
+        )        
 
     async def on_enter(self):
         # when the agent is added to the session, it'll generate a reply
@@ -88,19 +89,24 @@ class Prev_experience_Agent(Agent):
             instructions=f"{common_instructions} The candidates's name is {name}."
             "You have to ask the candidate to tell about their past experiences and if they have done any internships or full-time."
             "Do not ask any follow-up questions"
-            "Once you are satisfied and have completed the interview "
-            "you MUST call the function `interview_finished`.",
+            "Once you are satisfied and have completed the interview, trigger the `interview_finished`"
+            f"If the user does not respond for 20 secs, verify by asking {name} are you still there ?. If the candidate still not respond then trigger the `interview_finished`",
+            # "you MUST call the function `interview_finished`.",
             llm = "openai/gpt-4.1-mini",
             tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
             chat_ctx=chat_ctx,
         )
+        
+        # self.silence_task: asyncio.Task | None = None
+        # self.timeout_seconds = 15
+        # self.timeout_count = 0
         
 
     async def on_enter(self):
         # when the agent is added to the session, we'll initiate the conversation by
         # using the LLM to generate a reply
         self.session.generate_reply()
-        
+    
     @function_tool
     async def interview_finished(self, context: RunContext[InterviewData]):
         """When you are fininshed with the interview so call this function to end the conversation."""
@@ -115,6 +121,97 @@ class Prev_experience_Agent(Agent):
         job_ctx = get_job_context()
         await job_ctx.api.room.delete_room(api.DeleteRoomRequest(room=job_ctx.room.name))
     
+    ###### TIME BASED FALLBACK ######
+    
+    # @function_tool
+    # async def prev_exp_information(
+    #     self,
+    #     context: RunContext[InterviewData],
+    #     name: str,
+    #     exp: str 
+    #     ):
+    #         """
+    #     #     Called when the user has provided their introduction
+    #     #     Args:
+    #     #         exp: Previous experience response of the candidate
+    #     #     """
+    #         print("-----STORING USER EXPERIENCE-----")
+    #         context.userdata.exp = exp
+            
+    #         if exp is not None: 
+    #             if self.silence_task:
+    #                 self.silence_task.cancel()
+    #                 self.timeout_count = 0
+    #         else :  
+    #             print("-------SILENT TIMER STARTED-------")
+    #             self.start_silence_timer()
+    #             self.timeout_count = 1
+                
+    #             if self.timeout_count == 1:
+    #                 await self.session.generate_reply(
+    #                     instructions="Since there is no response, politely end the interview."
+    #                 )
+    #                 # await self.session.generate_reply(
+    #                 #     instructions="Politely ask if the candidate is still present."
+    #                 # )
+    #                 job_ctx = get_job_context()
+    #                 await job_ctx.api.room.delete_room(
+    #                     api.DeleteRoomRequest(room=job_ctx.room.name)
+    #                 )
+
+        
+    # async def on_user_message(self):
+    #     print("-------SILENT TIMER STARTED-------")
+    #     self.start_silence_timer()
+        
+    #     if self.silence_task:
+    #         print("-------SILENT TIMER STOPPED-------")
+    #         self.silence_task.cancel()
+    #         self.silence_task = None
+            
+    #     print("----RESETING THE TIMER")
+    #     self.timeout_count = 0  # reset counter
+    #     await super().on_user_message()
+
+    # def start_silence_timer(self):
+    #     if self.silence_task:
+    #         self.silence_task.cancel()
+    #     print("------- HANDLING SILENCE -------")
+    #     self.silence_task = asyncio.create_task(self.handle_silence())
+
+    # async def handle_silence(self):
+    #     try:
+    #         await asyncio.sleep(self.timeout_seconds)
+    #         # If we reach here → user was silent
+    #         await self.handle_timeout()
+
+    #     except asyncio.CancelledError:
+    #         # User responded before timeout
+    #         pass
+    
+    # async def handle_timeout(self):
+    #     self.timeout_count += 1
+
+    #     if self.timeout_count == 1:
+    #         await self.session.generate_reply(
+    #             instructions="Politely ask if the candidate is still present."
+    #         )
+    #         self.start_silence_timer()
+
+    #     else:
+    #         await self.session.generate_reply(
+    #             instructions="Since there is no response, politely end the interview."
+    #         )
+
+    #         job_ctx = get_job_context()
+    #         await job_ctx.api.room.delete_room(
+    #             api.DeleteRoomRequest(room=job_ctx.room.name)
+    #         )
+
+
+
+    
+##################### QNA INTERVIEW AGENT #####################
 
     # @function_tool
     # async def previous_experience_gathered(
@@ -219,6 +316,10 @@ async def entrypoint(ctx: JobContext):
         tts="cartesia/sonic-3:9626c31c-bec5-4cca-baa8-f8ba9e84c8bc",
         userdata=InterviewData(),
     )
+    
+    # # Disable audio input at the start
+    # session.input.set_audio_enabled(False)
+
 
     # log metrics as they are emitted, and total usage after session is over
     usage_collector = metrics.UsageCollector()
