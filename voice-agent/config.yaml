@@ -1,0 +1,23 @@
+persona:
+  name: Kiya
+  title: senior AI developer
+  company: Jobnova
+  interviewing_for: junior AI Developer internship
+
+models:
+  llm:
+    provider: groq                          # Llama 3.3 via Groq API (450+ tok/s, free tier)
+    model: llama-3.3-70b-versatile
+    base_url: https://api.groq.com/openai/v1  # OpenAI-compatible endpoint
+
+  stt:
+    provider: groq-whisper                  # Whisper large-v3-turbo via Groq (open source, fast)
+    model: whisper-large-v3-turbo
+
+  tts:
+    provider: hf-kokoro                     # Kokoro-82M via HuggingFace Inference API (Apache 2)
+    model: hexgrad/Kokoro-82M
+    voice: af_heart                         # af_heart | af_sky | bf_emma | bf_isabella | ...
+
+interview:
+  silence_timeout_seconds: 20

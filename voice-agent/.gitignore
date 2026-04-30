@@ -1,0 +1,18 @@
+# Environment — never commit real credentials
+.env.local
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Virtual environments
+venv/
+.venv/
+
+# macOS
+.DS_Store
