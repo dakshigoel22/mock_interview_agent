@@ -1,60 +1,86 @@
 # Mock Interview Agent
 
-A voice-based mock interview system built on LiveKit. A candidate connects via browser and completes a structured voice interview conducted by an AI interviewer.
+A voice-based mock interview system built on LiveKit. The current implementation lives in [`voice-agent/`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent) and runs a staged AI interview over voice using Groq for LLM + STT and ElevenLabs for TTS.
 
-## How It Works
+## Current Flow
 
-```
+The voice pipeline is:
+
+```text
 Candidate (voice)
-       │
-  LiveKit Room  (WebRTC)
-       │
-  LiveKit Agent (Python)
-       │
-  ┌────┴──────────────────────────┐
-  │  IntroAgent                   │  → greets candidate, collects name + intro
-  │       ↓ (handoff)             │
-  │  ExperienceAgent              │  → asks about past roles, ends interview
-  └───────────────────────────────┘
-       │
-  STT: Groq Whisper  │  LLM: Groq Llama 3.3  │  TTS: ElevenLabs
+   -> LiveKit Room
+   -> LiveKit Agent
+   -> Graph-based interview orchestrator
+   -> Agent speech back to candidate
 ```
 
-State (`InterviewData`) is shared across agent handoffs via `RunContext`.
+The interview is currently structured as:
+
+1. name capture
+2. background / self-introduction
+3. experience questions
+4. technical questions
+5. report generation
+6. room close
+
+The control flow is now handled through the graph orchestration layer in [`voice-agent/graph/`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/graph), while LiveKit remains responsible for voice transport, STT/TTS, and room lifecycle.
 
 ## Stack
 
-| Layer | Provider | Model |
+| Layer | Provider / Library | Notes |
 |---|---|---|
-| LLM | Groq API | Llama 3.3-70b-versatile |
-| STT | Groq Whisper | whisper-large-v3-turbo |
-| TTS | ElevenLabs | default voice |
-| VAD | Silero | — |
-| Voice transport | LiveKit | open source |
+| Voice transport | LiveKit | real-time room + agent runtime |
+| Orchestration | Graph-based pipeline | implemented in `voice-agent/graph` |
+| LLM | Groq | `llama-3.3-70b-versatile` |
+| STT | Groq Whisper | `whisper-large-v3-turbo` |
+| TTS | ElevenLabs | configurable model + `voice_id` |
+| VAD | Silero | prewarmed in the LiveKit worker |
 
-## Agents
+## Project Layout
 
-### IntroAgent
-- Greets the candidate using the persona defined in `config.yaml`
-- Asks for name and a brief self-introduction
-- Calls `information_gathered(name, exp)` → hands off to `ExperienceAgent`
+```text
+mock_interview_agent/
+├── README.md
+└── voice-agent/
+    ├── agent.py
+    ├── config.yaml
+    ├── models.py
+    ├── graph/
+    │   ├── __init__.py
+    │   ├── interview_graph.py
+    │   ├── nodes.py
+    │   └── state.py
+    ├── models_ai/
+    │   ├── __init__.py
+    │   ├── audio.py
+    │   ├── stt.py
+    │   └── tts.py
+    ├── tests/
+    ├── PLAN.md
+    ├── PROJECT_STATUS.md
+    ├── pyproject.toml
+    ├── requirements.txt
+    └── .env.example
+```
 
-### ExperienceAgent
-- Asks the candidate to describe past work experiences and internships
-- Does not ask follow-up questions
-- Handles silence: after 20 s of no response, checks in ("are you still there?"); on second timeout, ends the interview
-- Calls `interview_finished(reason)` → generates goodbye, deletes the LiveKit room
+## Interview State
 
-## Shared State
+Runtime user/session data is stored in [`voice-agent/models.py`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/models.py):
 
 ```python
 @dataclass
 class InterviewData:
-    name: str | None = None     # candidate's name
-    prev_org: str | None = None
-    prev_role: str | None = None
-    exp: str | None = None      # self-introduction text
+    name: str | None = None
+    exp: str | None = None
+    experience_summary: str | None = None
+    technical_notes: list[dict] = field(default_factory=list)
 ```
+
+The graph orchestration layer also maintains per-session structured state and writes a saved artifact to:
+
+- [`voice-agent/session_logs/`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/session_logs)
+
+Each saved session JSON currently includes the captured candidate details, transcript, experience summary, technical observations, lightweight scores, and generated report markdown.
 
 ## Setup
 
@@ -62,9 +88,9 @@ class InterviewData:
 
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv)
-- LiveKit server (self-hosted or [LiveKit Cloud](https://livekit.io/cloud))
-- [Groq API key](https://console.groq.com) (free tier — powers LLM + STT)
-- [ElevenLabs API key](https://elevenlabs.io) (free tier — powers TTS)
+- a LiveKit project or self-hosted LiveKit server
+- a [Groq API key](https://console.groq.com)
+- an [ElevenLabs API key](https://elevenlabs.io)
 
 ### Install
 
@@ -80,7 +106,7 @@ uv sync
 cp .env.example .env.local
 ```
 
-Fill in `.env.local`:
+Fill in `.env.local` with your real secrets:
 
 ```env
 LIVEKIT_URL=wss://your-project.livekit.cloud
@@ -91,62 +117,79 @@ GROQ_API_KEY=your_groq_api_key
 ELEVENLABS_API_KEY=your_elevenlabs_api_key
 ```
 
-Edit `config.yaml` to change the interviewer persona, models, or silence timeout.
+Edit [`voice-agent/config.yaml`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/config.yaml) to customize:
 
-### Run
+- interviewer persona
+- role being interviewed for
+- Groq model names
+- ElevenLabs model + `voice_id`
+- experience topic sequence
+- number of technical questions
+
+## Run
+
+From inside `voice-agent/`:
 
 ```bash
-# Dev mode — connects to LiveKit Cloud, auto-reloads on file changes
 uv run agent.py dev
-
-# Console mode — runs a text-only session in the terminal (no LiveKit needed)
-uv run agent.py console
 ```
 
-To self-host LiveKit instead of LiveKit Cloud:
+Useful alternatives:
+
 ```bash
-docker run --rm -p 7880:7880 livekit/livekit-server --dev
-# set LIVEKIT_URL=ws://localhost:7880 in .env.local
+uv run agent.py console
+uv run pytest tests/ -v
 ```
 
-### Test
+## Deploy
+
+If you use the LiveKit CLI from repo root, point it at the nested secrets file:
+
+```bash
+lk agent deploy --secrets-file voice-agent/.env.local
+```
+
+If you are already inside `voice-agent/`, use:
+
+```bash
+lk agent deploy --secrets-file .env.local
+```
+
+## Current Capabilities
+
+- Captures candidate name and follows up for background
+- Uses candidate details in later prompts
+- Walks through configured experience topics
+- Asks technical questions after the experience stage
+- Records technical observations
+- Generates a simple end-of-session report artifact
+- Saves per-session logs under `session_logs/`
+- Closes the room when the interview reaches completion
+
+## Current Limitations
+
+- The graph orchestration is implemented, but the broader persistence/reporting stack is still local-file based rather than a full database-backed product workflow
+- Scoring is currently lightweight and heuristic, not yet a dedicated judge-model evaluation pipeline
+- Resume ingestion and a frontend report viewer are not implemented yet
+
+## Docs
+
+- Project status: [`voice-agent/PROJECT_STATUS.md`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/PROJECT_STATUS.md)
+- Roadmap: [`voice-agent/PLAN.md`](/Users/dakshigoel/Desktop/mock_interview_agent/voice-agent/PLAN.md)
+
+## Tests
+
+Run from `voice-agent/`:
 
 ```bash
 uv run pytest tests/ -v
 ```
 
-## Project Structure
+The repo currently includes coverage for:
 
-```
-voice-agent/
-├── agent.py            # IntroAgent + ExperienceAgent, entrypoint
-├── models.py           # InterviewData dataclass
-├── models_ai/
-│   ├── __init__.py     # build_llm / build_stt / build_tts factory functions
-│   ├── stt.py          # GroqWhisperSTT — custom LiveKit STT plugin
-│   ├── tts.py          # HFKokoroTTS — Kokoro wrapper (available, not active)
-│   └── audio.py        # PCM ↔ float32 conversion helpers
-├── config.yaml         # Persona, model settings, silence timeout
-├── tests/
-│   ├── test_config.py
-│   ├── test_dataclass.py
-│   ├── test_agents.py
-│   └── test_models_ai.py
-├── pyproject.toml
-├── requirements.txt
-└── .env.example
-```
-
-## Roadmap
-
-| Phase | Status | Description |
-|---|---|---|
-| 1 | ✅ Done | Cleanup, config extraction, 28 tests |
-| 2 | ✅ Done | Model swap — Groq LLM + STT, ElevenLabs TTS |
-| 3 | ⬜ Next | LangGraph orchestration + SQLite checkpointing |
-| 4 | ⬜ | Resume ingestion (PDF → personalized questions) |
-| 5 | ⬜ | Per-answer scoring + post-interview report |
-| 6 | ⬜ | Next.js frontend |
-| 7 | ⬜ | Deterministic silence handling via LangGraph |
-
-See [`voice-agent/PLAN.md`](voice-agent/PLAN.md) for the full implementation plan.
+- config validation
+- agent prompt / handoff behavior
+- graph-node progression
+- dataclass behavior
+- STT/TTS wrapper behavior
+- audio conversion helpers
