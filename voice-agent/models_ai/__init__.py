@@ -30,6 +30,8 @@ def build_tts(cfg: dict[str, Any]):
     from livekit.plugins import elevenlabs
 
     return elevenlabs.TTS(
+        model=cfg.get("model", "eleven_turbo_v2_5"),
+        voice_id=cfg.get("voice_id", "bIHbv24MWmeRgasZH58o"),
         api_key=_require_env("ELEVENLABS_API_KEY"),
     )
 

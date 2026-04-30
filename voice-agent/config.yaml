@@ -15,9 +15,16 @@ models:
     model: whisper-large-v3-turbo
 
   tts:
-    provider: hf-kokoro                     # Kokoro-82M via HuggingFace Inference API (Apache 2)
-    model: hexgrad/Kokoro-82M
-    voice: af_heart                         # af_heart | af_sky | bf_emma | bf_isabella | ...
+    provider: elevenlabs                    # ElevenLabs via LiveKit plugin
+    model: eleven_turbo_v2_5
+    voice_id: bIHbv24MWmeRgasZH58o          # Default ElevenLabs voice ID
 
 interview:
   silence_timeout_seconds: 20
+  experience_topics:
+    - most_recent_role
+    - one_project_deep_dive
+    - challenge_and_resolution
+  technical:
+    num_questions: 2
+    follow_ups_allowed: 1

@@ -14,5 +14,8 @@ build/
 venv/
 .venv/
 
+# Runtime artifacts
+session_logs/
+
 # macOS
 .DS_Store

@@ -16,6 +16,8 @@ dependencies = [
     "livekit-plugins-deepgram>=1.4.1",
     "livekit-plugins-cartesia>=1.4.1",
     "livekit-plugins-elevenlabs>=1.4.1",
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
 ]
 
 [project.optional-dependencies]

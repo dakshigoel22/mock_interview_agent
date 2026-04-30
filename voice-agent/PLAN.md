@@ -124,6 +124,7 @@ Wrote a custom LiveKit-compatible STT plugin at `models_ai/stt.py` (`GroqWhisper
 Uses `livekit-plugins-elevenlabs` (`build_tts` in `models_ai/__init__.py`).
 - Free tier available at elevenlabs.io
 - Requires: `ELEVENLABS_API_KEY`
+- Configured in `config.yaml` with `provider: elevenlabs`, an ElevenLabs `model`, and `voice_id`
 
 > **Note:** `models_ai/tts.py` contains a `HFKokoroTTS` wrapper (Kokoro-82M via HuggingFace Inference API, Apache 2) that is implemented but not currently active. To switch, replace `build_tts` to return `HFKokoroTTS(hf_token=...)` and set `HF_TOKEN` in `.env.local`.
 
@@ -146,6 +147,156 @@ Uses `livekit-plugins-openai` pointed at Groq's OpenAI-compatible endpoint.
 - Audio conversion round-trips correctly
 
 **Deliverable:** Agent runs with only `GROQ_API_KEY` + `ELEVENLABS_API_KEY` + LiveKit credentials. No local GPU or heavy model downloads required.
+
+---
+
+## Phase 2.5 — Agent Logic & Prompting Improvements ⬜ PROPOSED
+
+**Goal:** Make the existing 2-agent flow feel like a real interview — focused single-question turns, active acknowledgement, adaptive follow-ups — and add a third **TechnicalAgent** for role-specific evaluation. This is the last LiveKit-native iteration before Phase 3 replaces orchestration with LangGraph.
+
+### Why now
+
+The current prompts have several issues observable in dev sessions:
+1. **`IntroAgent`** asks for *name and introduction* in one breath — candidates often answer one but not the other, and `information_gathered` then either fires with `exp=""` or fires too late.
+2. **`ExperienceAgent`** is told "do not ask follow-up questions" — this makes the interview feel mechanical and surfaces no signal beyond a single monologue.
+3. The interview ends after one stage; there is no role-specific evaluation, so the persona's "interviewing for *junior AI Developer*" framing is wasted.
+4. Silence handling is encoded into the LLM instruction — fragile, not deterministic. (Phase 7 will fix this properly via LangGraph; until then, we tighten the prompt language.)
+
+### 2.5a — Refactor `common_instructions` and persona block
+
+Move from a flat string to a structured prompt template with named sections:
+
+```
+[Role]   You are {persona.name}, a {persona.title} at {persona.company}.
+[Goal]   Conduct a {stage_name} interview for the {persona.interviewing_for} role.
+[Style]  Polite and formal. One question at a time. Acknowledge before asking next.
+[Hard rules]
+  - Never answer the candidate's questions about the role, the company, or yourself.
+  - Never reveal a model answer or hint at one.
+  - Never reuse a question already asked in this conversation.
+  - Never compliment the candidate's answer ("great", "perfect"); stay neutral.
+[Turn discipline]
+  - Speak only after the candidate has finished their previous turn.
+  - If the candidate's response is empty or off-topic, briefly redirect.
+```
+
+The hard-rules block is the highest-leverage fix — current prompt has these scattered or missing.
+
+### 2.5b — `IntroAgent` rewrite
+
+**Behavior change:** ask name first, *wait*, then ask for intro. Two function tools instead of one:
+
+| Tool | Trigger | Stores |
+|---|---|---|
+| `name_captured(name)` | Candidate states their name | `userdata.name` |
+| `intro_captured(exp)`  | Candidate gives a 2+ sentence self-intro | `userdata.exp`, hands off to `ExperienceAgent` |
+
+Splitting captures means `userdata.name` is reliably set before the experience stage starts, so `ExperienceAgent` can address the candidate by name from turn one.
+
+Add an explicit re-prompt branch: if the candidate gives only a name (one word) when an intro was asked, re-ask: "Thanks {name}. Could you tell me a bit about your background — school, what you've worked on?"
+
+### 2.5c — `ExperienceAgent` rewrite
+
+**Behavior change:** ask focused questions, allow up to **2 follow-ups per topic**, then move on.
+
+Topics to cover (pulled from `config.yaml` so the persona can be reused):
+
+```yaml
+interview:
+  experience_topics:
+    - most_recent_role         # "Walk me through your most recent role."
+    - one_project_deep_dive    # "Pick one project you're proud of — what was your contribution?"
+    - challenge_and_resolution # "Describe a technical challenge you hit and how you resolved it."
+```
+
+For each topic, the agent runs a small loop:
+1. Ask the topic's opener question.
+2. Listen.
+3. If the answer is < 20 words OR vague (no specifics), ask one clarifying follow-up — *one*, not a chain.
+4. Acknowledge briefly ("Got it." / "Understood.") and move to the next topic.
+
+After all topics are covered, hand off to `TechnicalAgent` via a new function tool `experience_complete(summary)` instead of ending the interview. The `summary` is a one-paragraph LLM-generated summary of what the candidate said — passed to `TechnicalAgent` so its first question can reference real prior context.
+
+### 2.5d — New `TechnicalAgent`
+
+**Purpose:** ask 2 role-specific technical questions, adapted to the candidate's stated experience.
+
+**Inputs:** `name`, `experience_summary`, and the persona's `interviewing_for` role.
+
+**Question generation strategy:**
+- Question 1: a *concept* question (e.g., for an AI Dev role: "Walk me through what happens when a transformer attends to a sequence — at a high level.")
+- Question 2: an *applied / scenario* question (e.g., "Suppose your fine-tuned model is hallucinating on out-of-distribution inputs in production. Walk me through how you'd debug it.")
+
+Question text is generated by the LLM at runtime, conditioned on:
+- Role from `config.yaml`
+- `experience_summary` from `ExperienceAgent`
+
+This keeps the agent honest — questions are not hardcoded, but the *kind* of question is constrained by prompt template, so the LLM can't drift into trivia or arithmetic.
+
+**One follow-up rule:** if the candidate's first answer is shallow, ask exactly one clarifying probe. Then move on. Never argue with the answer.
+
+**Internal notes:** after each candidate answer, the agent calls a tool `record_observation(question, answer, observation)` that appends to `userdata.technical_notes: list[dict]`. These notes lay the groundwork for Phase 5 scoring — for now they're just logged.
+
+After both questions, hand off to closing via `interview_complete()` which:
+1. Generates a neutral close ("Thank you, {name}. We'll be in touch.")
+2. Deletes the room.
+
+### 2.5e — Update `models.py`
+
+```python
+@dataclass
+class InterviewData:
+    name: str | None = None
+    exp: str | None = None                          # raw self-intro from IntroAgent
+    experience_summary: str | None = None           # one-paragraph summary from ExperienceAgent
+    technical_notes: list[dict] = field(default_factory=list)
+    # technical_notes entries: {"q": str, "a": str, "obs": str}
+    # prev_org / prev_role removed — never populated, dead fields
+```
+
+### 2.5f — Update `config.yaml`
+
+```yaml
+interview:
+  silence_timeout_seconds: 20
+  experience_topics:
+    - most_recent_role
+    - one_project_deep_dive
+    - challenge_and_resolution
+  technical:
+    num_questions: 2
+    follow_ups_allowed: 1
+```
+
+### 2.5g — Tests
+
+Extend `tests/test_agents.py`:
+- `IntroAgent`: `name_captured` stores name without ending stage; `intro_captured` ends stage and produces `ExperienceAgent`.
+- `ExperienceAgent`: `experience_complete(summary)` populates `userdata.experience_summary` and returns a `TechnicalAgent`.
+- `TechnicalAgent`: `record_observation` appends to `userdata.technical_notes`; `interview_complete` triggers room deletion path (mocked).
+- Prompt-level: each agent's `instructions` contains the [Hard rules] block (regression guard so future edits don't drop it).
+
+Target: ~12 new tests, total ~40.
+
+### 2.5h — Manual validation checklist
+
+After implementation, run `uv run agent.py console` and verify:
+- [ ] Agent asks name first, waits, then asks for intro (does not combine)
+- [ ] Agent never compliments answers ("great", "excellent")
+- [ ] Each experience topic gets at most one follow-up
+- [ ] Handoff to `TechnicalAgent` happens after the third experience topic
+- [ ] Technical questions reference something the candidate actually said
+- [ ] Closing message is neutral (no "you did great")
+
+### Deliverable
+
+A demo session in console mode that *feels* like a real interview: paced, focused, role-aware, and 3 stages deep. No LangGraph yet (that's Phase 3), but the prompting bones are solid and the third agent is in place ready to be migrated.
+
+### Risks / non-goals
+
+- **Not adding scoring yet** — `technical_notes` is just structured logs. Real scoring is Phase 5.
+- **Silence handling stays prompt-based** for now — Phase 7 makes it deterministic.
+- **No resume input yet** — questions are generated from in-conversation context only. Phase 4 adds resume grounding.
 
 ---
 
@@ -422,7 +573,8 @@ npm install && npm run dev
 |---|---|---|
 | 1 | ✅ Done | Cleanup, config extraction, 28 tests |
 | 2 | ✅ Done | Model swap — Groq Whisper STT, ElevenLabs TTS, Groq Llama 3.3 LLM |
-| 3 | ⬜ Next | LangGraph orchestration layer + SQLite checkpointing |
+| 2.5 | ⬜ Next | Agent logic + prompting overhaul; add `TechnicalAgent` (3-stage flow) |
+| 3 | ⬜ | LangGraph orchestration layer + SQLite checkpointing |
 | 4 | ⬜ | Resume ingestion (PDF → personalized questions) |
 | 5 | ⬜ | Per-answer scoring + post-interview report |
 | 6 | ⬜ | Next.js frontend |

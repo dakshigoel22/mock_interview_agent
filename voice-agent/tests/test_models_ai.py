@@ -112,20 +112,20 @@ def test_config_stt_model_is_whisper():
     assert "whisper" in cfg["models"]["stt"]["model"].lower()
 
 
-def test_config_tts_provider_is_hf_kokoro():
+def test_config_tts_provider_is_elevenlabs():
     cfg = _load_cfg()
-    assert "kokoro" in cfg["models"]["tts"]["provider"].lower()
+    assert cfg["models"]["tts"]["provider"] == "elevenlabs"
 
 
-def test_config_tts_has_voice():
+def test_config_tts_has_voice_id():
     cfg = _load_cfg()
-    voice = cfg["models"]["tts"]["voice"]
-    assert isinstance(voice, str) and len(voice) > 0
+    voice_id = cfg["models"]["tts"]["voice_id"]
+    assert isinstance(voice_id, str) and len(voice_id) > 0
 
 
-def test_config_tts_model_is_kokoro():
+def test_config_tts_model_is_elevenlabs():
     cfg = _load_cfg()
-    assert "kokoro" in cfg["models"]["tts"]["model"].lower()
+    assert "eleven" in cfg["models"]["tts"]["model"].lower()
 
 
 def test_config_silence_timeout_positive():
@@ -220,6 +220,24 @@ def _make_livekit_stubs():
     agents.stt = stt_mod
     agents.tts = tts_mod
 
+    plugins_mod = types.ModuleType("livekit.plugins")
+    openai_mod = MagicMock()
+    silero_mod = MagicMock()
+    nc_mod = MagicMock()
+    elevenlabs_mod = types.ModuleType("livekit.plugins.elevenlabs")
+
+    class _ElevenLabsTTS:
+        def __init__(self, *, voice_id="bIHbv24MWmeRgasZH58o", model="eleven_turbo_v2_5", api_key=None, **kw):
+            self.voice_id = voice_id
+            self.model = model
+            self.api_key = api_key
+
+    elevenlabs_mod.TTS = _ElevenLabsTTS
+    plugins_mod.openai = openai_mod
+    plugins_mod.silero = silero_mod
+    plugins_mod.noise_cancellation = nc_mod
+    plugins_mod.elevenlabs = elevenlabs_mod
+
     return {
         "dotenv": dotenv_mod,
         "livekit": livekit,
@@ -229,10 +247,11 @@ def _make_livekit_stubs():
         "livekit.agents.tts": tts_mod,
         "livekit.agents.types": types_mod,
         "livekit.agents.utils": utils_mod,
-        "livekit.plugins": MagicMock(),
-        "livekit.plugins.openai": MagicMock(),
-        "livekit.plugins.silero": MagicMock(),
-        "livekit.plugins.noise_cancellation": MagicMock(),
+        "livekit.plugins": plugins_mod,
+        "livekit.plugins.openai": openai_mod,
+        "livekit.plugins.silero": silero_mod,
+        "livekit.plugins.noise_cancellation": nc_mod,
+        "livekit.plugins.elevenlabs": elevenlabs_mod,
     }
 
 
@@ -391,24 +410,22 @@ def test_build_stt_creates_groq_whisper(lk_stubs):
             assert s._model_name == "whisper-large-v3-turbo"
 
 
-def test_build_tts_creates_hf_kokoro(lk_stubs):
+def test_build_tts_creates_elevenlabs(lk_stubs):
     with patch.dict(sys.modules, lk_stubs):
         sys.modules.pop("models_ai", None)
-        sys.modules.pop("models_ai.tts", None)
-        with patch.dict("os.environ", {"HF_TOKEN": "test"}):
+        with patch.dict("os.environ", {"ELEVENLABS_API_KEY": "test"}):
             from models_ai import build_tts
-            from models_ai.tts import HFKokoroTTS
-            t = build_tts({"voice": "af_sky", "model": "hexgrad/Kokoro-82M"})
-            assert isinstance(t, HFKokoroTTS)
-            assert t._voice == "af_sky"
+            t = build_tts({"voice_id": "voice-123", "model": "eleven_flash_v2_5"})
+            assert t.voice_id == "voice-123"
+            assert t.model == "eleven_flash_v2_5"
+            assert t.api_key == "test"
 
 
 def test_build_tts_defaults(lk_stubs):
     with patch.dict(sys.modules, lk_stubs):
         sys.modules.pop("models_ai", None)
-        sys.modules.pop("models_ai.tts", None)
-        with patch.dict("os.environ", {"HF_TOKEN": "test"}):
+        with patch.dict("os.environ", {"ELEVENLABS_API_KEY": "test"}):
             from models_ai import build_tts
             t = build_tts({})
-            assert t._voice == "af_heart"
-            assert "Kokoro" in t._model
+            assert t.voice_id == "bIHbv24MWmeRgasZH58o"
+            assert t.model == "eleven_turbo_v2_5"
